@@ -11,20 +11,22 @@ model:
   prenorm: false
   norm: batch
   layer:
-    d_state: 4
+    # Use fractional kernel instead of regular diag
+    mode: fractional  # or 'fractional_s4d'
+    d_state: 64
+    # Fractional S4D parameters
+    alpha: 0.25  # Fractional order
+    beta: 1.0    # Mittag-Leffler beta parameter
+    ml_terms: 16 # Number of terms in Mittag-Leffler series
+    dt_min: 0.001
+    dt_max: 0.1
     lr:
       dt: null
       A: 0.001
       B: 0.001
-    dt_min: 0.001
-    dt_max: 0.1
-    init: legs
+    init: diag-lin
     bidirectional: true
     n_ssm: 1
-    # Fractional S4D parameters (used when mode=fractional)
-    alpha: null  # Fractional order (default: 0.25 when using fractional kernel)
-    beta: null  # Mittag-Leffler beta parameter (default: 1.0)
-    ml_terms: null  # Number of terms in Mittag-Leffler series (default: 16)
 
 decoder:
   mode: pool

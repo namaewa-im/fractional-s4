@@ -68,6 +68,12 @@ class FFTConv(SequenceModule):
             # )
             kernel, mode = mode, kernel
         kernel_cls = kernel_registry[kernel]
+        
+        # Filter out fractional-specific parameters for non-fractional kernels
+        fractional_params = {'alpha', 'beta', 'ml_terms'}
+        if kernel not in ['fractional', 'fractional_s4d']:
+            kernel_args = {k: v for k, v in kernel_args.items() if k not in fractional_params}
+        
         self.kernel = kernel_cls(
             d_model=self.d_model,
             l_max=self.l_max,
