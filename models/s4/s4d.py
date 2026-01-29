@@ -18,7 +18,10 @@ def torch_mittag_leffler(z, alpha, beta, series_terms, max_abs=50.0):
     z = torch.where(abs_z > max_abs, z / abs_z * max_abs, z)
 
     k = torch.arange(series_terms, device=z.device, dtype=z.real.dtype)
-    gamma = torch.exp(torch.lgamma(alpha * k + beta))
+    # Ensure alpha * k + beta > 0 to avoid NaN in lgamma
+    gamma_arg = alpha * k + beta
+    gamma_arg = torch.clamp(gamma_arg, min=1e-8)  # Prevent negative or zero arguments
+    gamma = torch.exp(torch.lgamma(gamma_arg))
 
     term = torch.ones_like(z)
     out = term / gamma[0]
@@ -26,6 +29,10 @@ def torch_mittag_leffler(z, alpha, beta, series_terms, max_abs=50.0):
     for i in range(1, series_terms):
         term = term * z
         out = out + term / gamma[i]
+        # Check for NaN/Inf and clip if necessary
+        if torch.isnan(out).any() or torch.isinf(out).any():
+            # Fallback: use exp approximation for large z
+            out = torch.where(torch.isnan(out) | torch.isinf(out), torch.exp(z), out)
 
     return out
 
@@ -133,9 +140,15 @@ class FractionalS4DKernel(Kernel):
 
             # fractional ZOH kernel
             # C: (C, H, N), E1-E0: (H, N, L), A: (H, N)
+            # Add small epsilon to A to prevent division by zero
+            A_safe = A.unsqueeze(-1).unsqueeze(0) + 1e-8
             K = 2 * torch.real(
-                torch.sum(C.unsqueeze(-1) * (E1 - E0).unsqueeze(0) / A.unsqueeze(-1).unsqueeze(0), dim=2)
+                torch.sum(C.unsqueeze(-1) * (E1 - E0).unsqueeze(0) / A_safe, dim=2)
             )  # (C, H, L)
+            
+            # Check for NaN/Inf and replace with zeros if necessary
+            if torch.isnan(K).any() or torch.isinf(K).any():
+                K = torch.where(torch.isnan(K) | torch.isinf(K), torch.zeros_like(K), K)
         
         if self.verbose and L <= 10:  # Only print for short kernels
             print("Kernel min/max:", K.min().item(), K.max().item())
@@ -175,7 +188,10 @@ class S4D(nn.Module):
         L = u.size(-1)
 
         # Compute SSM Kernel
-        k = self.kernel(L=L) # (H L)
+        k, _ = self.kernel(L=L) # (C, H, L), state_info (ignored)
+        # Handle channels dimension: if k has channels, take first channel or squeeze
+        if k.dim() == 3:  # (C, H, L)
+            k = k[0] if k.size(0) == 1 else k.mean(dim=0)  # (H, L)
 
         # Convolution
         # Note: rfft output shape is (..., L+1) for n=2*L
@@ -195,6 +211,8 @@ class S4D(nn.Module):
 # Quick sanity test
 # -------------------------------------------------
 if __name__ == "__main__":
+    # run PYTHONPATH=/home/{username}/s4:$PYTHONPATH python models/s4/s4d.py
+    
     import torch
 
     torch.manual_seed(0)
